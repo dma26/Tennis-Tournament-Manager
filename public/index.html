@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Tennis Tournament Manager</title>
+
+<style>
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f8;
+    margin: 40px;
+}
+
+h1 {
+    text-align: center;
+}
+
+section {
+    background: white;
+    padding: 20px;
+    margin: 20px auto;
+    width: 600px;
+    border-radius: 8px;
+    box-shadow: 0px 2px 6px rgba(0,0,0,0.1);
+}
+
+input {
+    padding: 8px;
+    margin: 5px;
+}
+
+button {
+    padding: 6px 10px;
+    margin-left: 8px;
+    cursor: pointer;
+}
+
+ul {
+    list-style: none;
+    padding: 0;
+}
+
+li {
+    padding: 8px;
+    border-bottom: 1px solid #ddd;
+}
+
+#message {
+    text-align: center;
+    color: green;
+    font-weight: bold;
+}
+
+button {
+    background: #0077ff;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 6px;
+}
+button:hover {
+    background: #005fcc;
+}
+
+.match-card {
+    background: #fff;
+    padding: 15px;
+    border-left: 5px solid #0077ff;
+    margin-bottom: 10px;
+    border-radius: 6px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h1>Tennis Tournament Manager</h1>
+
+<div id="message"></div>
+<div id="loading" style="display:none; text-align:center">Loading...</div>
+
+<section>
+<h2>Add Player</h2>
+
+<form id="playerForm">
+<input type="text" id="name" placeholder="Name" required>
+<input type="number" id="age" placeholder="Age">
+<input type="number" id="ranking" placeholder="Ranking">
+<input type="number" id="seed" placeholder="Seed">
+<button type="submit">Add Player</button>
+</form>
+
+</section>
+
+<section>
+<h2>Players</h2>
+<ul id="playerList"></ul>
+</section>
+
+<section>
+  <h2>Select Tournament</h2>
+  <select id="tournamentSelect" onchange="onTournamentChange()"></select>
+  <button onclick="deleteTournament()">Delete Tournament</button>
+  <div id="tournamentDate" style="margin-top:8px; font-weight:bold;"></div>
+</section>
+
+<section>
+  <h2>Create Tournament</h2>
+  <input id="tName" placeholder="Tournament Name">
+  <input id="tDate" type="date">
+  <button onclick="createTournament()">Create</button>
+</section>
+
+<section>
+<h2>Generate Random Matches</h2>
+<button onclick="generateMatches()">Generate Matches</button>
+</section>
+
+<section id="winnerSection" style="display:none;">
+  <h2>Tournament Winner</h2>
+  <div id="winnerNameDisplay" style="font-size:20px; font-weight:bold;"></div>
+</section>
+
+<section>
+<h2>Matches</h2>
+<ul id="matchList"></ul>
+</section>
+
+<script>
+
+const API = "http://localhost:3000"
+
+const playerList = document.getElementById("playerList")
+const matchList = document.getElementById("matchList")
+const message = document.getElementById("message")
+
+function showMessage(text){
+    message.textContent = text
+    setTimeout(()=> message.textContent = "", 3000)
+}
+
+function showLoading() {
+    document.getElementById("loading").style.display = "block";
+}
+
+function hideLoading() {
+    document.getElementById("loading").style.display = "none";
+}
+
+// Load Tournaments
+let tournamentsData = [];
+
+async function loadTournaments() {
+    const res = await fetch(`${API}/tournaments`);
+    const tournaments = await res.json();
+
+    tournamentsData = tournaments;
+
+    const select = document.getElementById("tournamentSelect");
+    select.innerHTML = "";
+
+    tournaments.forEach(t => {
+        const option = document.createElement("option");
+        option.value = t.id;
+        option.textContent = t.name;
+        select.appendChild(option);
+    });
+
+    if (tournaments.length > 0) {
+        showTournamentDate(select.value);
+        loadMatches(select.value);
+    }
+}
+
+// Add Tournament
+async function createTournament() {
+    const t = {
+        name: document.getElementById("tName").value,
+        start_date: document.getElementById("tDate").value
+    };
+
+    await fetch(`${API}/tournaments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(t)
+    });
+
+    showMessage("Tournament created!");
+    loadTournaments(); // refresh dropdown
+}
+
+function showTournamentDate(tournamentId) {
+    const dateDiv = document.getElementById("tournamentDate");
+    const tournament = tournamentsData.find(t => t.id == tournamentId);
+    if (tournament) {
+        const date = new Date(tournament.start_date);
+        dateDiv.textContent = `Start Date: ${date.toLocaleDateString()}`;
+    } else {
+        dateDiv.textContent = "";
+    }
+}
+
+function onTournamentChange() {
+    const id = document.getElementById("tournamentSelect").value;
+    document.getElementById("winnerSection").style.display = "none";
+    document.getElementById("winnerNameDisplay").textContent = "";
+
+    showTournamentDate(id); // NEW
+
+    loadMatches(id);
+}
+
+// Delete Tournament
+async function deleteTournament() {
+    const id = document.getElementById("tournamentSelect").value;
+
+    if (!confirm("Delete this tournament?")) return;
+
+    await fetch(`${API}/tournaments/${id}`, {
+        method: "DELETE"
+    });
+
+    showMessage("Tournament deleted");
+
+    loadTournaments();
+    matchList.innerHTML = "";
+}
+
+// Load Players
+async function loadPlayers() {
+    showLoading();
+    const res = await fetch(`${API}/players`);
+    hideLoading();
+    const players = await res.json();
+
+    playerList.innerHTML = "";
+
+    players.forEach(player => {
+        const li = document.createElement("div");
+        li.className = "match-card";
+
+        // Add data attributes for uniqueness checks
+        li.dataset.id = player.id;
+        li.dataset.ranking = player.ranking;
+        li.dataset.seed = player.seed;
+
+        li.innerHTML = `
+            ${player.name} (Age ${player.age}, Ranking ${player.ranking}, Seed ${player.seed})
+            <button onclick='editPlayer(${player.id}, ${JSON.stringify(player.name)}, ${player.age}, ${player.ranking}, ${player.seed})'>Edit</button>
+            <button onclick="deletePlayer(${player.id})">Delete</button>
+        `;
+        playerList.appendChild(li);
+    });
+}
+
+// Add Player
+document.getElementById("playerForm").addEventListener("submit", async e => {
+    e.preventDefault();
+
+    const name = document.getElementById("name").value.trim();
+    const age = Number(document.getElementById("age").value);
+    const ranking = Number(document.getElementById("ranking").value);
+    const seed = Number(document.getElementById("seed").value);
+
+    if (!name) return showMessage("Name cannot be empty");
+    if (!Number.isInteger(age) || age < 10 || age > 100) return showMessage("Age must be 10-100");
+    if (!Number.isInteger(ranking) || ranking <= 0) return showMessage("Ranking must be positive");
+    if (!Number.isInteger(seed) || seed <= 0) return showMessage("Seed must be positive");
+
+    // Check uniqueness
+    const uniqueCheck = isUniquePlayer(ranking, seed);
+    if (!uniqueCheck.valid) return showMessage(`${uniqueCheck.field} must be unique`);
+
+    await fetch(`${API}/players`, {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ name, age, ranking, seed })
+    });
+
+    showMessage("Player added");
+    loadPlayers();
+});
+
+// Edit Player
+function editPlayer(id, name, age, ranking, seed) {
+    const newName = prompt("New name:", name);
+    if (!newName || !newName.trim()) {
+        return showMessage("Name cannot be empty");
+    }
+
+    const newAge = Number(prompt("New age:", age));
+    if (!Number.isInteger(newAge) || newAge < 10 || newAge > 100) {
+        return showMessage("Age must be a valid number between 10 and 100");
+    }
+
+    const newRanking = Number(prompt("New ranking:", ranking));
+    if (!Number.isInteger(newRanking) || newRanking <= 0) {
+        return showMessage("Ranking must be a positive integer");
+    }
+
+    const newSeed = Number(prompt("New seed:", seed));
+    if (!Number.isInteger(newSeed) || newSeed <= 0) {
+        return showMessage("Seed must be a positive integer");
+    }
+
+    const uniqueCheck = isUniquePlayer(newRanking, newSeed, id);
+    if (!uniqueCheck.valid) {
+        return showMessage(`${uniqueCheck.field} must be unique`);
+    }
+
+    // Send update to server
+    fetch(`${API}/players/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            name: newName.trim(),
+            age: newAge,
+            ranking: newRanking,
+            seed: newSeed
+        })
+    })
+    .then(() => {
+        showMessage("Player updated successfully");
+        loadPlayers();
+    })
+    .catch(err => {
+        console.error(err);
+        showMessage("Failed to update player");
+    });
+}
+
+// Delete Player
+async function deletePlayer(id){
+
+    await fetch(`${API}/players/${id}`, {method:"DELETE"})
+
+    showMessage("Player removed")
+
+    loadPlayers()
+
+}
+
+// Check Player is Unique
+function isUniquePlayer(ranking, seed, excludeId = null) {
+    const players = Array.from(document.querySelectorAll("#playerList .match-card"));
+    for (const p of players) {
+        const existingRanking = Number(p.dataset.ranking);
+        const existingSeed = Number(p.dataset.seed);
+        const playerId = Number(p.dataset.id);
+        if (excludeId && playerId === excludeId) continue;
+
+        if (ranking === existingRanking) return { valid: false, field: "ranking" };
+        if (seed === existingSeed) return { valid: false, field: "seed" };
+    }
+    return { valid: true };
+}
+
+// Load Matches
+async function loadMatches(tournamentId) {
+    if (!tournamentId) {
+        tournamentId = document.getElementById("tournamentSelect").value;
+    }
+    matchList.innerHTML = "<li>Loading matches...</li>";
+
+    const resRound = await fetch(`${API}/tournaments/${tournamentId}/rounds`);
+    const rounds = await resRound.json();
+
+    if (rounds.length === 0) {
+        matchList.innerHTML = "<li>No rounds found.</li>";
+        return;
+    }
+
+    matchList.innerHTML = "";
+
+    for (const r of rounds) {
+        const roundHeader = document.createElement("h3");
+        roundHeader.textContent = `Round ${r.round_number}`;
+        matchList.appendChild(roundHeader);
+
+        const resMatches = await fetch(`${API}/rounds/${r.id}/matches`);
+        const matches = await resMatches.json();
+
+        if (matches.length === 0) {
+            const li = document.createElement("li");
+            li.textContent = "No matches for this round.";
+            matchList.appendChild(li);
+            continue;
+        }
+
+        matches.forEach(match => {
+            const li = document.createElement("div");
+            li.className = "match-card";
+            li.innerHTML = `
+                ${match.player1} vs ${match.player2 ?? "BYE"}
+                <br>
+                Winner: ${match.winner ?? "TBD"}
+                <br>
+                Score: ${match.score ?? "-"}
+                <br><br>
+                ${match.player2 && match.winner === null ? `
+                    <input id="score-${match.id}" placeholder="Enter score (e.g., 6-4 6-3)" />
+                    <br>
+                    <button onclick="setWinner(${match.id}, ${match.player1_id})">${match.player1} Wins</button>
+                    <button onclick="setWinner(${match.id}, ${match.player2_id})">${match.player2} Wins</button>
+                ` : match.player2 === null ? `<i>Bye — automatically advances</i>` : ""}
+            `;
+            matchList.appendChild(li);
+        });
+    }
+}
+
+async function generateMatches() {
+    const tournamentId = document.getElementById("tournamentSelect").value;
+
+    await fetch(`${API}/tournaments/${tournamentId}/generate-matches`, {
+        method: "POST"
+    });
+
+    showMessage("Random matches generated!");
+
+    // Refresh matches immediately
+    loadMatches(tournamentId);
+}
+
+// Set Winner + Auto-Advance to Next Round
+async function setWinner(matchId, playerId){
+    const score = document.getElementById(`score-${matchId}`).value;
+
+    await fetch(`${API}/matches/${matchId}`, {
+        method:"PUT",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({winner_id: playerId, score: score})
+    });
+
+    showMessage("Winner + score recorded");
+
+    // Generate next round if round is complete
+    const tournamentId = document.getElementById("tournamentSelect").value;
+    const data = await fetch(`${API}/tournaments/${tournamentId}/next-round`, {method: "POST"})
+        .then(r => r.json());
+
+    if (data.matchesCreated) {
+        showMessage(`Next round generated!`);
+    } else if (data.message?.includes("Tournament winner")) {
+        showMessage(data.message);
+        const winnerSection = document.getElementById("winnerSection");
+        const winnerDisplay = document.getElementById("winnerNameDisplay");
+        winnerDisplay.textContent = data.winnerName;
+        winnerSection.style.display = "block";
+        showMessage(`Tournament winner: ${data.winnerName}`);
+    }
+
+    // Reload matches for current active round
+    loadMatches(tournamentId);
+}
+
+loadPlayers()
+loadTournaments()
+
+</script>
+
+</body>
+</html>
