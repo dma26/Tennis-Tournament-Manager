@@ -1,5 +1,5 @@
 const express = require('express');
-const {Pool} = require('pg');
+const { Pool } = require('pg');
 const cors = require('cors');
 
 const app = express();
@@ -9,12 +9,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Connecting to PostgreSQL
+// PostgreSQL connection
 const pool = new Pool({
     user: 'postgres',
     host: 'localhost',
     database: 'my-first-project',
-    password: 'YOUR_PASSWORD',
+    password: 'DMa52808',
     port: 5432
 });
 
@@ -35,398 +35,472 @@ async function resetMatches() {
 
 resetMatches();
 
-// Getting all players
+
+// GET all players
 app.get('/api/players', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM players ORDER BY id');
-    res.status(200).json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch players' });
-  }
+    try {
+        const result = await pool.query('SELECT * FROM players ORDER BY id');
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch players' });
+    }
 });
 
-// Getting one player
+// GET one player
 app.get('/api/players/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('SELECT * FROM players WHERE id = $1', [id]);
+    try {
+        const { id } = req.params;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Player not found' });
+        const result = await pool.query(
+            'SELECT * FROM players WHERE id = $1',
+            [id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Player not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
     }
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
 });
 
-// Creating a player
+// CREATE player
 app.post('/api/players', async (req, res) => {
-  try {
-    const { name, age, ranking } = req.body;
+    const { name, age, ranking, seed } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: 'name is required' });
+    if (!name || name.trim() === '') {
+        return res.status(400).json({ error: 'name is required' });
     }
 
-    const result = await pool.query(
-      'INSERT INTO players (name, age, ranking) VALUES ($1, $2, $3) RETURNING *',
-      [name, age, ranking]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create player' });
-  }
+    if (age === undefined || age === null || typeof age !== 'number' || age < 10 || age > 100) {
+        return res.status(400).json({ error: 'age must be a number between 10 and 100' });
+    }
+
+    if (ranking === undefined || ranking === null || typeof ranking !== 'number' || ranking <= 0) {
+        return res.status(400).json({ error: 'ranking must be a positive number' });
+    }
+
+    if (seed === undefined || seed === null || typeof seed !== 'number' || seed <= 0) {
+        return res.status(400).json({ error: 'seed must be a positive number' });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO players (name, age, ranking, seed) VALUES ($1, $2, $3, $4) RETURNING *',
+            [name.trim(), age, ranking, seed]
+        );
+
+        res.status(201).json(result.rows[0]);
+     } catch (err) {
+        if (err.code === "23505") {
+            return res.status(400).json({ error: "ranking or seed must be unique" });
+        }
+        console.error(err);
+        res.status(500).json({ error: 'Failed to create player' });
+    }
 });
 
-// Updating a player
+// UPDATE player
 app.put('/api/players/:id', async (req, res) => {
-  try {
     const { id } = req.params;
-    const { name, age, ranking } = req.body;
+    const { name, age, ranking, seed } = req.body;
 
-    const result = await pool.query(
-      'UPDATE players SET name=$1, age=$2, ranking=$3 WHERE id=$4 RETURNING *',
-      [name, age, ranking, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Player not found' });
+    if (!name || name.trim() === '') {
+        return res.status(400).json({ error: 'name is required' });
     }
 
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update player' });
-  }
+    if (typeof age !== 'number' || age < 10 || age > 100) {
+        return res.status(400).json({ error: 'age must be 10–100' });
+    }
+
+    if (typeof ranking !== 'number' || ranking <= 0) {
+        return res.status(400).json({ error: 'ranking must be positive' });
+    }
+
+    if (typeof seed !== 'number' || seed <= 0) {
+        return res.status(400).json({ error: 'seed must be positive' });
+    }
+
+    try {
+        const result = await pool.query(
+            'UPDATE players SET name=$1, age=$2, ranking=$3, seed=$4 WHERE id=$5 RETURNING *',
+            [name.trim(), age, ranking, seed, id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Player not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        if (err.code === "23505") {
+            return res.status(400).json({ error: "ranking or seed must be unique" });
+        }
+        console.error(err);
+        res.status(500).json({ error: 'Failed to update player' });
+    }
 });
 
-// Deleting a player
+// DELETE player
 app.delete('/api/players/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+    try {
+        const { id } = req.params;
 
-    const result = await pool.query(
-      'DELETE FROM players WHERE id = $1 RETURNING *', [id]
-    );
+        const result = await pool.query(
+            'DELETE FROM players WHERE id=$1 RETURNING *',
+            [id]
+        );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Player not found' });
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Player not found' });
+        }
+
+        res.status(200).json({ message: 'Player deleted', deleted: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to delete player' });
     }
-
-    res.status(200).json({ message: 'Player deleted', deleted: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete player' });
-  }
 });
 
-// Getting all tournaments
+// GET all tournaments
 app.get('/api/tournaments', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM tournaments ORDER BY id');
-    res.status(200).json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch tournaments' });
-  }
+    try {
+        const result = await pool.query('SELECT * FROM tournaments ORDER BY id');
+        res.status(200).json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch tournaments' });
+    }
 });
 
-// Getting one tournament
+// GET one tournament
 app.get('/api/tournaments/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM tournaments WHERE id = $1',
-      [id]
-    );
+    try {
+        const result = await pool.query(
+            'SELECT * FROM tournaments WHERE id=$1',
+            [req.params.id]
+        );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Tournament not found' });
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Tournament not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
     }
-
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
 });
 
-// Creating a tournament
+// CREATE tournament
 app.post('/api/tournaments', async (req, res) => {
-  try {
-    const { name, location, date } = req.body;
+    const { name, start_date } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: 'name is required' });
+    if (!name || name.trim() === '') {
+        return res.status(400).json({ error: 'name is required' });
     }
 
-    const result = await pool.query(
-      'INSERT INTO tournaments (name, location, date) VALUES ($1, $2, $3) RETURNING *',
-      [name, location, date]
-    );
+    if (!start_date) {
+        return res.status(400).json({ error: 'start date is required' });
+    }
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create tournament' });
-  }
+    try {
+        const result = await pool.query(
+            'INSERT INTO tournaments (name, start_date) VALUES ($1, $2) RETURNING *',
+            [name.trim(), start_date]
+        );
+
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to create tournament' });
+    }
 });
 
-// Updating a tournament
+// UPDATE tournament
 app.put('/api/tournaments/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, location, date } = req.body;
+    const { name, start_date } = req.body;
 
-    const result = await pool.query(
-      'UPDATE tournaments SET name=$1, location=$2, date=$3 WHERE id=$4 RETURNING *',
-      [name, location, date, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Tournament not found' });
+    if (!name || name.trim() === '') {
+        return res.status(400).json({ error: 'name is required' });
     }
 
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update tournament' });
-  }
+    if (!start_date) {
+        return res.status(400).json({ error: 'start date is required' });
+    }
+
+    try {
+        const result = await pool.query(
+            'UPDATE tournaments SET name=$1, start_date=$2 WHERE id=$3 RETURNING *',
+            [name.trim(), start_date, req.params.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Tournament not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update tournament' });
+    }
 });
 
-// Deleting a tournament
+// DELETE tournament
 app.delete('/api/tournaments/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+    try {
+        const result = await pool.query(
+            'DELETE FROM tournaments WHERE id=$1 RETURNING *',
+            [req.params.id]
+        );
 
-    const result = await pool.query(
-      'DELETE FROM tournaments WHERE id = $1 RETURNING *',
-      [id]
-    );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Tournament not found' });
+        }
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Tournament not found' });
+        res.status(200).json({ message: 'Tournament deleted', deleted: result.rows[0] });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete tournament' });
     }
-
-    res.status(200).json({ message: 'Tournament deleted', deleted: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete tournament' });
-  }
 });
 
-// Getting all rounds
+// GET all rounds
 app.get('/api/rounds', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM rounds ORDER BY id');
-    res.status(200).json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch rounds' });
-  }
-});
-
-// Getting one round
-app.get('/api/rounds/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM rounds WHERE id = $1',
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Round not found' });
+    try {
+        const result = await pool.query('SELECT * FROM rounds ORDER BY id');
+        res.status(200).json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch rounds' });
     }
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
 });
 
-// Creating a round
+// GET one round
+app.get('/api/rounds/:id', async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM rounds WHERE id=$1',
+            [req.params.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Round not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// CREATE round
 app.post('/api/rounds', async (req, res) => {
-  try {
     const { tournament_id, round_number } = req.body;
 
-    if (!tournament_id || !round_number) {
-      return res.status(400).json({ error: 'tournament_id and round_number are required' });
+    if (!tournament_id || typeof tournament_id !== 'number') {
+        return res.status(400).json({ error: 'tournament_id is required and must be a number' });
     }
 
-    const result = await pool.query(
-      'INSERT INTO rounds (tournament_id, round_number) VALUES ($1, $2) RETURNING *',
-      [tournament_id, round_number]
-    );
+    if (!round_number || typeof round_number !== 'number') {
+        return res.status(400).json({ error: 'round_number is required and must be a number' });
+    }
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create round' });
-  }
+    try {
+        const result = await pool.query(
+            'INSERT INTO rounds (tournament_id, round_number) VALUES ($1, $2) RETURNING *',
+            [tournament_id, round_number]
+        );
+
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to create round' });
+    }
 });
 
-// Updating a round
+// UPDATE round
 app.put('/api/rounds/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
     const { round_number } = req.body;
 
-    const result = await pool.query(
-      'UPDATE rounds SET round_number=$1 WHERE id=$2 RETURNING *',
-      [round_number, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Round not found' });
+    if (typeof round_number !== 'number') {
+        return res.status(400).json({ error: 'round_number must be a number' });
     }
 
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update round' });
-  }
+    try {
+        const result = await pool.query(
+            'UPDATE rounds SET round_number=$1 WHERE id=$2 RETURNING *',
+            [round_number, req.params.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Round not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update round' });
+    }
 });
 
-// Deleting a round
+// DELETE round
 app.delete('/api/rounds/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+    try {
+        const result = await pool.query(
+            'DELETE FROM rounds WHERE id=$1 RETURNING *',
+            [req.params.id]
+        );
 
-    const result = await pool.query(
-      'DELETE FROM rounds WHERE id = $1 RETURNING *',
-      [id]
-    );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Round not found' });
+        }
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Round not found' });
+        res.status(200).json({ message: 'Round deleted', deleted: result.rows[0] });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete round' });
     }
-
-    res.status(200).json({ message: 'Round deleted', deleted: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete round' });
-  }
 });
 
-// Getting all matches
+// GET all matches
 app.get('/api/matches', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM matches ORDER BY id');
-    res.status(200).json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch matches' });
-  }
+    try {
+        const result = await pool.query(
+            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score, m.match_time FROM matches LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id ORDER BY m.id;');
+        res.status(200).json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch matches' });
+    }
 });
 
-// Getting one match
+// GET one match
 app.get('/api/matches/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query('SELECT * FROM matches WHERE id = $1', [id]);
+    try {
+        const result = await pool.query(
+            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score, m.match_time FROM matches LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id WHERE m.id = $1',
+            [req.params.id]
+        );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Match not found' });
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Match not found' });
+        }
+
+        res.status(200).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Server error' });
     }
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
 });
 
-// Creating a match
+// CREATE match
 app.post('/api/matches', async (req, res) => {
-  try {
-    const { round_id, player1_id, player2_id, winner_id } = req.body;
+    const { round_id, player1_id, player2_id } = req.body;
 
-    if (!round_id || !player1_id || !player2_id) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (typeof round_id !== 'number') {
+        return res.status(400).json({ error: 'round_id is required' });
     }
 
-    const result = await pool.query(
-      'INSERT INTO matches (round_id, player1_id, player2_id, winner_id) VALUES ($1, $2, $3, $4) RETURNING *',
-      [round_id, player1_id, player2_id, winner_id]
-    );
-
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to create match' });
-  }
-});
-
-// Updating a match
-app.put('/api/matches/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { winner_id } = req.body;
-
-    const result = await pool.query(
-      'UPDATE matches SET winner_id=$1 WHERE id=$2 RETURNING *',
-      [winner_id, id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Match not found' });
+    if (typeof player1_id !== 'number') {
+        return res.status(400).json({ error: 'player1_id is required' });
     }
 
-    res.status(200).json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to update match' });
-  }
+    if (player2_id !== null && typeof player2_id !== 'number') {
+        return res.status(400).json({ error: "player2_id must be null or a number" });
+    }
+
+    if (player1_id === player2_id) {
+        return res.status(400).json({ error: "Players must be different" });
+    }
+
+    try {
+        const result = await pool.query(
+            'INSERT INTO matches (round_id, player1_id, player2_id) VALUES ($1, $2, $3) RETURNING *',
+            [round_id, player1_id, player2_id || null]
+        );
+
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to create match' });
+    }
 });
 
-// Deleting a match
+// UPDATE match
+app.put("/api/matches/:id", async (req, res) => {
+    const id = req.params.id;
+    const {winner_id, score} = req.body;
+
+    if (typeof score !== "string" || score.trim() === "") {
+        return res.status(400).json({ error: "score required" });
+    }
+
+    try {
+        const result = await pool.query(
+            "UPDATE matches SET winner_id=$1, score=$2 WHERE id=$3 RETURNING *",
+            [winner_id, score, id]
+        );
+
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({error: "Failed to update match result"});
+    }
+});
+
+// DELETE match
 app.delete('/api/matches/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
+    try {
+        const result = await pool.query(
+            'DELETE FROM matches WHERE id=$1 RETURNING *',
+            [req.params.id]
+        );
 
-    const result = await pool.query(
-      'DELETE FROM matches WHERE id = $1 RETURNING *',
-      [id]
-    );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Match not found' });
+        }
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Match not found' });
+        res.status(200).json({ message: 'Match deleted', deleted: result.rows[0] });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete match' });
     }
-
-    res.status(200).json({ message: 'Match deleted', deleted: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to delete match' });
-  }
 });
 
-// Getting all matches in one round
+// GET all rounds in one tournament
+app.get('/api/tournaments/:id/rounds', async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT * FROM rounds WHERE tournament_id = $1 ORDER BY round_number',
+            [req.params.id]
+        );
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to fetch rounds" });
+    }
+});
+
+// GET all matches in one round
 app.get('/api/rounds/:id/matches', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM matches WHERE round_id = $1 ORDER BY id',
-      [id]
-    );
-    res.status(200).json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch matches for this round' });
-  }
+    try {
+        const result = await pool.query(
+            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score, m.match_time FROM matches m LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id WHERE m.round_id = $1 ORDER BY m.id',
+            [req.params.id]
+        );
+
+        res.status(200).json(result.rows);
+        console.log("Round ID:", req.params.id);
+    } catch (err) {
+        console.error("DB ERROR:", err);
+        res.status(500).json({
+            error: 'Failed to fetch matches for round',
+            detail: err.message
+    });
+}
 });
 
 function shuffle(array) {
-  let current = array.length,
-    randomIndex;
+  let current = array.length, randomIndex;
 
   while (current !== 0) {
     randomIndex = Math.floor(Math.random() * current);
     current--;
-    [array[current], array[randomIndex]] = [array[randomIndex], array[current]];
+
+    [array[current], array[randomIndex]] =
+      [array[randomIndex], array[current]];
   }
 
   return array;
@@ -434,50 +508,209 @@ function shuffle(array) {
 
 // Generate matches in a tournament
 app.post('/api/tournaments/:id/generate-matches', async (req, res) => {
-  try {
     const tournament_id = req.params.id;
 
-    const tour = await pool.query('SELECT * FROM tournaments WHERE id=$1', [tournament_id]);
-    if (tour.rows.length === 0) {
-        return res.status(404).json({ error: 'Tournament not found' });
+    try {
+        // 1. DELETE existing matches for this tournament
+        await pool.query(`
+            DELETE FROM matches
+            WHERE round_id IN (
+                SELECT id FROM rounds WHERE tournament_id = $1
+            )
+        `, [tournament_id]);
+
+        await pool.query("DELETE FROM rounds WHERE tournament_id = $1", [tournament_id]);
+
+        // 2. Count players
+        const playersResult = await pool.query(
+            "SELECT id FROM players ORDER BY RANDOM()"
+        );
+        let players = playersResult.rows.map(p => p.id);
+        let playerCount = players.length;
+
+        // 3. Create Round 1
+        const round1 = await pool.query(
+            "INSERT INTO rounds (tournament_id, round_number) VALUES ($1, $2) RETURNING id",
+            [tournament_id, 1]
+        );
+        const round1Id = round1.rows[0].id;
+
+        // 4. Pair players
+        let matchPairs = [];
+
+        while (players.length >= 2) {
+            let p1 = players.pop();
+            let p2 = players.pop() ?? null;
+            matchPairs.push([p1, p2]);
+        }
+
+        if (players.length === 1) {
+            // BYE
+            matchPairs.push([players.pop(), null]);
+        }
+
+        // 5. Insert matches
+        for (const [p1, p2] of matchPairs) {
+
+            if (!p1) continue;
+
+            await pool.query(
+                "INSERT INTO matches(round_id, player1_id, player2_id, match_time, winner_id) VALUES ($1, $2, $3, NOW(), $4)",
+                [round1Id, p1, p2 ?? null, p2 === null ? p1 : null]
+            );
+        }
+
+        return res.json({
+            message: "Round 1 generated dynamically",
+            matchesCreated: matchPairs.length
+        });
+    
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({error: "Failed to create matches"});
     }
+});
 
-    // Create round
-    const roundResult = await pool.query(
-      'INSERT INTO rounds (tournament_id, round_number) VALUES ($1, $2) RETURNING *',
-      [tournament_id, 1]
-    );
+// Generating next round
+app.post("/api/tournaments/:id/next-round", async (req, res) => {
+    const tournament_id = req.params.id;
 
-    const round_id = roundResult.rows[0].id;
+    try {
+        // 1. Load existing rounds
+        const roundsResult = await pool.query(
+            "SELECT * FROM rounds WHERE tournament_id = $1 ORDER BY round_number ASC",
+            [tournament_id]
+        );
+        const rounds = roundsResult.rows;
 
-    const players = await pool.query('SELECT * FROM players');
-    if (players.rows.length < 2)
-      return res.status(400).json({ error: 'Not enough players' });
+        if (rounds.length === 0) {
+            return res.status(400).json({error: "Generate matches first"});
+        }
 
-    const shuffled = shuffle(players.rows);
+        const lastRound = rounds[rounds.length - 1];
 
-    let matches = [];
+        const matchesResult = await pool.query(
+            "SELECT * FROM matches WHERE round_id = $1",
+            [lastRound.id]
+        );
+        const matches = matchesResult.rows;
 
-    for (let i = 0; i < shuffled.length; i += 2) {
-      const p1 = shuffled[i];
-      const p2 = shuffled[i + 1];
+        // 2. Do not generate next round until ALL matches finished
+        const allCompleted = matches.every(m =>
+            m.winner_id !== null || m.player2_id === null
+        );
 
-      if (!p2) break;
+        if (!allCompleted) {
+            return res.json({message: "Round not complete"});
+        }
 
-      const match = await pool.query(
-        'INSERT INTO matches (round_id, player1_id, player2_id) VALUES ($1, $2, $3) RETURNING *',
-        [round_id, p1.id, p2.id]
-      );
-      matches.push(match.rows[0]);
+        // 3. Collect winners
+        const winners = matches.map(
+            m => m.winner_id ?? m.player1_id
+        );
+
+        // 4. If only 1 winner → tournament is finished
+        if (winners.length === 1) {
+            const resultWinner = await pool.query(
+                "SELECT name FROM players WHERE id = $1",
+                [winners[0]]
+            );
+            const winnerName = resultWinner.rows[0].name;
+
+            return res.json({
+                message: `Tournament winner: ${winnerName}`,
+                winnerName
+            });
+        }
+
+        // 5. Create next round
+        const nextRoundNumber = lastRound.round_number + 1;
+
+        const nextRound = await pool.query(
+            "INSERT INTO rounds (tournament_id, round_number) VALUES ($1, $2) RETURNING id",
+            [tournament_id, nextRoundNumber]
+        );
+        const nextRoundId = nextRound.rows[0].id;
+
+        // 6. Pair winners
+        let shuffled = winners.sort(() => Math.random() - 0.5);
+        let matchPairs = [];
+
+        while (shuffled.length >= 2) {
+            matchPairs.push([shuffled.pop(), shuffled.pop()]);
+        }
+
+        if (shuffled.length === 1) {
+            matchPairs.push([shuffled.pop(), null]);
+        }
+
+        // 7. Insert matches
+        for (const [p1, p2] of matchPairs) {
+            await pool.query(
+                "INSERT INTO matches(round_id, player1_id, player2_id, match_time, winner_id) VALUES ($1, $2, $3, NOW(), $4)",
+                [nextRoundId, p1, p2, p2 === null ? p1 : null]
+            );
+        }
+
+        res.json({
+            message: `Round ${nextRoundNumber} generated`,
+            matchesCreated: matchPairs.length
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({error: "Failed to generate next round"});
     }
+});
 
-    res.status(201).json({ round_id, matches });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to generate matches' });
-  }
+// Public API usage
+app.get('/api/tournaments/:id/enriched', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const dbResult = await pool.query(
+            'SELECT * FROM tournaments WHERE id = $1',
+            [id]
+        );
+
+        if (dbResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Tournament not found' });
+        }
+
+        const tournament = dbResult.rows[0];
+
+        const searchName = encodeURIComponent(tournament.name);
+
+        const url = `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${searchName}`;
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            return res.status(500).json({ error: 'Public API request failed' });
+        }
+
+        const data = await response.json();
+
+        const teamInfo = data?.teams?.[0] || null;
+
+        res.status(200).json({
+            tournament,
+            enrichment: teamInfo
+                ? {
+                    teamName: teamInfo.strTeam,
+                    sport: teamInfo.strSport,
+                    league: teamInfo.strLeague,
+                    country: teamInfo.strCountry
+                }
+                : null
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch enriched tournament data' });
+    }
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
