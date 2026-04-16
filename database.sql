@@ -4,7 +4,8 @@ CREATE TABLE players (
     name VARCHAR(100) NOT NULL,
     age INTEGER,
     ranking INTEGER UNIQUE,
-    seed INTEGER UNIQUE 
+    seed INTEGER UNIQUE, 
+    active BOOLEAN DEFAULT TRUE
 );
 
 -- tournament table
@@ -30,7 +31,6 @@ CREATE TABLE matches (
     player1_id INTEGER NOT NULL,
     player2_id INTEGER,
     winner_id INTEGER,
-    match_time TIMESTAMP,
     score VARCHAR(50),
 
     FOREIGN KEY (round_id) REFERENCES rounds(id),

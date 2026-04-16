@@ -101,15 +101,20 @@ button:hover {
 </section>
 
 <section>
+<h2>Inactive Players</h2>
+<ul id="inactivePlayerList"></ul>
+</section>
+
+<section id="playerDetailsSection" style="display:none;">
+  <h2>Player Details</h2>
+  <div id="playerDetails"></div>
+</section>
+
+<section>
   <h2>Select Tournament</h2>
   <select id="tournamentSelect" onchange="onTournamentChange()"></select>
   <button onclick="deleteTournament()">Delete Tournament</button>
   <div id="tournamentDate" style="margin-top:8px; font-weight:bold;"></div>
-</section>
-
-<section id="publicApiSection">
-   <h2>Enriched Tournament Info</h2>
-   <div id="apiData"></div>
 </section>
 
 <section>
@@ -178,7 +183,6 @@ async function loadTournaments() {
         select.value = tournaments[0].id;
         showTournamentDate(select.value);
         loadMatches(select.value);
-        loadEnrichedTournament(select.value);
     }
 }
 
@@ -220,7 +224,6 @@ function onTournamentChange() {
 
     showTournamentDate(id);
     loadMatches(id);
-    loadEnrichedTournament(id);
 }
 
 // Delete Tournament
@@ -242,27 +245,49 @@ async function deleteTournament() {
 // Load Players
 async function loadPlayers() {
     showLoading();
+
     const res = await fetch(`${API}/api/players`);
     hideLoading();
+
     const players = await res.json();
+
+    const activePlayers = players.filter(p => p.active === true);
+    const inactivePlayers = players.filter(p => p.active === false);
 
     playerList.innerHTML = "";
 
-    players.forEach(player => {
+    activePlayers.forEach(player => {
         const li = document.createElement("div");
         li.className = "match-card";
 
-        // Add data attributes for uniqueness checks
         li.dataset.id = player.id;
         li.dataset.ranking = player.ranking;
         li.dataset.seed = player.seed;
 
         li.innerHTML = `
             ${player.name} (Age ${player.age}, Ranking ${player.ranking}, Seed ${player.seed})
-            <button onclick='editPlayer(${player.id}, ${JSON.stringify(player.name)}, ${player.age}, ${player.ranking}, ${player.seed})'>Edit</button>
-            <button onclick="deletePlayer(${player.id})">Delete</button>
+            <button onclick='editPlayer(${player.id}, "${player.name}", ${player.age}, ${player.ranking}, ${player.seed})'>Edit</button>
+            <button onclick="withdrawPlayer(${player.id})">Withdraw</button>
+            <button onclick="viewPlayerDetails(${player.id})">Details</button>
         `;
+
         playerList.appendChild(li);
+    });
+
+    const inactiveList = document.getElementById("inactivePlayerList");
+    
+    inactiveList.innerHTML = "";
+
+    inactivePlayers.forEach(player => {
+        const li = document.createElement("div");
+        li.className = "match-card";
+
+        li.innerHTML = `
+            ${player.name} (WITHDRAWN)
+            <button onclick="reactivatePlayer(${player.id})">Re-enter</button>
+        `;
+
+        inactiveList.appendChild(li);
     });
 }
 
@@ -284,11 +309,16 @@ document.getElementById("playerForm").addEventListener("submit", async e => {
     const uniqueCheck = isUniquePlayer(ranking, seed);
     if (!uniqueCheck.valid) return showMessage(`${uniqueCheck.field} must be unique`);
 
-    await fetch(`${API}/api/players`, {
+    const res = await fetch(`${API}/api/players`, {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify({ name, age, ranking, seed })
     });
+
+    if (!res.ok) {
+        const err = await res.json();
+        return showMessage(err.error || "Failed to add player");
+    }
 
     showMessage("Player added");
     loadPlayers();
@@ -353,9 +383,31 @@ async function deletePlayer(id){
 
 }
 
+// Withdraw Player
+async function withdrawPlayer(id) {
+    if (!confirm("Withdraw this player from future tournaments?")) return;
+
+    await fetch(`${API}/api/players/${id}`, {
+        method: "DELETE"
+    });
+
+    showMessage("Player withdrawn");
+    loadPlayers();
+}
+
+// Reactivate Player
+async function reactivatePlayer(id) {
+    await fetch(`${API}/api/players/${id}/reactivate`, {
+        method: "PUT"
+    });
+
+    showMessage("Player re-entered");
+    loadPlayers();
+}
+
 // Check Player is Unique
 function isUniquePlayer(ranking, seed, excludeId = null) {
-    const players = Array.from(document.querySelectorAll("#playerList .match-card"));
+    const players = Array.from(document.querySelectorAll("#playerList .match-card")); 
     for (const p of players) {
         const existingRanking = Number(p.dataset.ranking);
         const existingSeed = Number(p.dataset.seed);
@@ -472,23 +524,53 @@ async function setWinner(matchId, playerId){
     loadMatches(tournamentId);
 }
 
-async function loadEnrichedTournament(id) {
-    const res = await fetch(`${API}/api/tournaments/${id}/enriched`);
-    const data = await res.json();
+// Show Player Details
+async function viewPlayerDetails(id) {
+    try {
+        showLoading();
 
-    const div = document.getElementById("apiData");
+        const res = await fetch(`${API}/api/players/${id}/details`);
+        const data = await res.json();
 
-    if (!data.enrichment) {
-        div.innerHTML = "No matching team found.";
-        return;
+        hideLoading();
+
+        if (!res.ok) {
+            throw new Error(data.error || "Failed to load player details");
+        }
+
+        const section = document.getElementById("playerDetailsSection");
+        const container = document.getElementById("playerDetails");
+
+        container.innerHTML = `
+            <div class="match-card">
+                <h2>${data.name}</h2>
+
+                <img src="${data.photo}" width="150" />
+
+                <p><b>Age:</b> ${data.age}</p>
+                <p><b>Ranking:</b> ${data.ranking}</p>
+                <p><b>Seed:</b> ${data.seed}</p>
+
+                <hr>
+
+                <p><b>Nationality:</b> ${data.nationality}</p>
+                <p><b>Height:</b> ${data.height}</p>
+                <p><b>Weight:</b> ${data.weight}</p>
+                <p><b>Handedness:</b> ${data.handedness}</p>
+                <p><b>Playstyle:</b> ${data.playstyle}</p>
+
+                <p style="margin-top:10px;">
+                    ${data.description}
+                </p>
+            </div>
+        `;
+
+        section.style.display = "block";
+
+    } catch (err) {
+        hideLoading();
+        showMessage(err.message);
     }
-
-    div.innerHTML = `
-        <strong>Team:</strong> ${data.enrichment.teamName}<br>
-        <strong>Sport:</strong> ${data.enrichment.sport}<br>
-        <strong>League:</strong> ${data.enrichment.league}<br>
-        <strong>Country:</strong> ${data.enrichment.country}
-    `;
 }
 
 loadPlayers()

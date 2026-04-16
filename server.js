@@ -1,6 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+require('dotenv').config();
 
 const app = express();
 const PORT = 3000;
@@ -14,7 +15,7 @@ const pool = new Pool({
     user: 'postgres',
     host: 'localhost',
     database: 'my-first-project',
-    password: 'DMa52808',
+    password: process.env.DB_PASSWORD,
     port: 5432
 });
 
@@ -33,8 +34,13 @@ async function resetMatches() {
     await query("ALTER SEQUENCE matches_id_seq RESTART WITH 1");
 }
 
-resetMatches();
+async function resetRounds() {
+    await query("DELETE FROM rounds");
+    await query("ALTER SEQUENCE rounds_id_seq RESTART WITH 1");
+}
 
+resetMatches();
+resetRounds();
 
 // GET all players
 app.get('/api/players', async (req, res) => {
@@ -90,7 +96,7 @@ app.post('/api/players', async (req, res) => {
 
     try {
         const result = await pool.query(
-            'INSERT INTO players (name, age, ranking, seed) VALUES ($1, $2, $3, $4) RETURNING *',
+            'INSERT INTO players (name, age, ranking, seed, active) VALUES ($1, $2, $3, $4, TRUE) RETURNING *',
             [name.trim(), age, ranking, seed]
         );
 
@@ -145,24 +151,48 @@ app.put('/api/players/:id', async (req, res) => {
     }
 });
 
-// DELETE player
+// WITHDRAW player
 app.delete('/api/players/:id', async (req, res) => {
     try {
-        const { id } = req.params;
-
         const result = await pool.query(
-            'DELETE FROM players WHERE id=$1 RETURNING *',
-            [id]
+            'UPDATE players SET active = FALSE WHERE id = $1 RETURNING *',
+            [req.params.id]
         );
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Player not found' });
         }
 
-        res.status(200).json({ message: 'Player deleted', deleted: result.rows[0] });
+        res.status(200).json({
+            message: 'Player withdrawn (set inactive)',
+            withdrawn: result.rows[0]
+        });
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to delete player' });
+        res.status(500).json({ error: 'Failed to withdraw player' });
+    }
+});
+
+// REACTIVATE player
+app.put('/api/players/:id/reactivate', async (req, res) => {
+    try {
+        const result = await pool.query(
+            'UPDATE players SET active = TRUE WHERE id = $1 RETURNING *',
+            [req.params.id]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Player not found' });
+        }
+
+        res.status(200).json({
+            message: 'Player reactivated',
+            player: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to reactivate player' });
     }
 });
 
@@ -206,6 +236,10 @@ app.post('/api/tournaments', async (req, res) => {
         return res.status(400).json({ error: 'start date is required' });
     }
 
+    if (isNaN(Date.parse(start_date))) {
+        return res.status(400).json({ error: "Invalid date format" });
+    }
+
     try {
         const result = await pool.query(
             'INSERT INTO tournaments (name, start_date) VALUES ($1, $2) RETURNING *',
@@ -228,6 +262,10 @@ app.put('/api/tournaments/:id', async (req, res) => {
 
     if (!start_date) {
         return res.status(400).json({ error: 'start date is required' });
+    }
+
+    if (isNaN(Date.parse(start_date))) {
+        return res.status(400).json({ error: "Invalid date format" });
     }
 
     try {
@@ -305,6 +343,15 @@ app.post('/api/rounds', async (req, res) => {
     }
 
     try {
+        const tournamentCheck = await pool.query(
+            "SELECT * FROM tournaments WHERE id = $1",
+            [tournament_id]
+        );
+
+        if (tournamentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Tournament not found" });
+        }
+
         const result = await pool.query(
             'INSERT INTO rounds (tournament_id, round_number) VALUES ($1, $2) RETURNING *',
             [tournament_id, round_number]
@@ -325,6 +372,15 @@ app.put('/api/rounds/:id', async (req, res) => {
     }
 
     try {
+        const existing = await pool.query(
+            "SELECT * FROM rounds WHERE id = $1",
+            [req.params.id]
+        );
+
+        if (existing.rows.length === 0) {
+            return res.status(404).json({ error: "Round not found" });
+        }
+
         const result = await pool.query(
             'UPDATE rounds SET round_number=$1 WHERE id=$2 RETURNING *',
             [round_number, req.params.id]
@@ -362,7 +418,7 @@ app.delete('/api/rounds/:id', async (req, res) => {
 app.get('/api/matches', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score, m.match_time FROM matches LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id ORDER BY m.id;');
+            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score FROM matches LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id ORDER BY m.id;');
         res.status(200).json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch matches' });
@@ -373,7 +429,7 @@ app.get('/api/matches', async (req, res) => {
 app.get('/api/matches/:id', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score, m.match_time FROM matches LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id WHERE m.id = $1',
+            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score FROM matches LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id WHERE m.id = $1',
             [req.params.id]
         );
 
@@ -408,6 +464,32 @@ app.post('/api/matches', async (req, res) => {
     }
 
     try {
+        const roundCheck = await pool.query(
+            "SELECT * FROM rounds WHERE id = $1",
+            [round_id]
+        );
+        if (roundCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Round not found" });
+        }
+
+        const player1Check = await pool.query(
+            "SELECT * FROM players WHERE id = $1",
+            [player1_id]
+        );
+        if (player1Check.rows.length === 0) {
+            return res.status(404).json({ error: "Player1 not found" });
+        }
+
+        if (player2_id !== null) {
+            const player2Check = await pool.query(
+                "SELECT * FROM players WHERE id = $1",
+                [player2_id]
+            );
+            if (player2Check.rows.length === 0) {
+                return res.status(404).json({ error: "Player2 not found" });
+            }
+        }
+
         const result = await pool.query(
             'INSERT INTO matches (round_id, player1_id, player2_id) VALUES ($1, $2, $3) RETURNING *',
             [round_id, player1_id, player2_id || null]
@@ -422,22 +504,44 @@ app.post('/api/matches', async (req, res) => {
 // UPDATE match
 app.put("/api/matches/:id", async (req, res) => {
     const id = req.params.id;
-    const {winner_id, score} = req.body;
+    const { winner_id, score } = req.body;
+
+    if (winner_id === undefined || typeof winner_id !== "number") {
+        return res.status(400).json({ error: "winner_id must be a number" });
+    }
 
     if (typeof score !== "string" || score.trim() === "") {
         return res.status(400).json({ error: "score required" });
     }
 
     try {
-        const result = await pool.query(
-            "UPDATE matches SET winner_id=$1, score=$2 WHERE id=$3 RETURNING *",
-            [winner_id, score, id]
+        const matchCheck = await pool.query(
+            "SELECT * FROM matches WHERE id = $1",
+            [id]
         );
 
-        res.json(result.rows[0]);
+        if (matchCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Match not found" });
+        }
+
+        const match = matchCheck.rows[0];
+
+        if (winner_id !== match.player1_id && winner_id !== match.player2_id) {
+            return res.status(400).json({
+                error: "winner must be one of the players in the match"
+            });
+        }
+
+        const result = await pool.query(
+            "UPDATE matches SET winner_id=$1, score=$2 WHERE id=$3 RETURNING *",
+            [winner_id, score.trim(), id]
+        );
+
+        res.status(200).json(result.rows[0]);
+
     } catch (err) {
         console.error(err);
-        res.status(500).json({error: "Failed to update match result"});
+        res.status(500).json({ error: "Failed to update match result" });
     }
 });
 
@@ -477,7 +581,7 @@ app.get('/api/tournaments/:id/rounds', async (req, res) => {
 app.get('/api/rounds/:id/matches', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score, m.match_time FROM matches m LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w  ON w.id = m.winner_id WHERE m.round_id = $1 ORDER BY m.id',
+            'SELECT m.id, m.round_id, p1.name AS player1, p2.name AS player2, w.name AS winner, m.player1_id, m.player2_id, m.winner_id, m.score FROM matches m LEFT JOIN players p1 ON p1.id = m.player1_id LEFT JOIN players p2 ON p2.id = m.player2_id LEFT JOIN players w ON w.id = m.winner_id WHERE m.round_id = $1 ORDER BY m.id',
             [req.params.id]
         );
 
@@ -511,6 +615,15 @@ app.post('/api/tournaments/:id/generate-matches', async (req, res) => {
     const tournament_id = req.params.id;
 
     try {
+        const tournamentCheck = await pool.query(
+            "SELECT * FROM tournaments WHERE id = $1",
+            [tournament_id]
+        );
+
+        if (tournamentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Tournament not found" });
+        }
+
         // 1. DELETE existing matches for this tournament
         await pool.query(`
             DELETE FROM matches
@@ -523,7 +636,7 @@ app.post('/api/tournaments/:id/generate-matches', async (req, res) => {
 
         // 2. Count players
         const playersResult = await pool.query(
-            "SELECT id FROM players ORDER BY RANDOM()"
+            "SELECT id FROM players WHERE active = TRUE ORDER BY RANDOM()"
         );
         let players = playersResult.rows.map(p => p.id);
         let playerCount = players.length;
@@ -555,7 +668,7 @@ app.post('/api/tournaments/:id/generate-matches', async (req, res) => {
             if (!p1) continue;
 
             await pool.query(
-                "INSERT INTO matches(round_id, player1_id, player2_id, match_time, winner_id) VALUES ($1, $2, $3, NOW(), $4)",
+                "INSERT INTO matches(round_id, player1_id, player2_id, winner_id) VALUES ($1, $2, $3, $4)",
                 [round1Id, p1, p2 ?? null, p2 === null ? p1 : null]
             );
         }
@@ -576,6 +689,15 @@ app.post("/api/tournaments/:id/next-round", async (req, res) => {
     const tournament_id = req.params.id;
 
     try {
+        const tournamentCheck = await pool.query(
+            "SELECT * FROM tournaments WHERE id = $1",
+            [tournament_id]
+        );
+
+        if (tournamentCheck.rows.length === 0) {
+            return res.status(404).json({ error: "Tournament not found" });
+        }
+        
         // 1. Load existing rounds
         const roundsResult = await pool.query(
             "SELECT * FROM rounds WHERE tournament_id = $1 ORDER BY round_number ASC",
@@ -647,7 +769,7 @@ app.post("/api/tournaments/:id/next-round", async (req, res) => {
         // 7. Insert matches
         for (const [p1, p2] of matchPairs) {
             await pool.query(
-                "INSERT INTO matches(round_id, player1_id, player2_id, match_time, winner_id) VALUES ($1, $2, $3, NOW(), $4)",
+                "INSERT INTO matches(round_id, player1_id, player2_id, winner_id) VALUES ($1, $2, $3, $4)",
                 [nextRoundId, p1, p2, p2 === null ? p1 : null]
             );
         }
@@ -663,52 +785,122 @@ app.post("/api/tournaments/:id/next-round", async (req, res) => {
     }
 });
 
-// Public API usage
-app.get('/api/tournaments/:id/enriched', async (req, res) => {
-    try {
-        const { id } = req.params;
+const fallbackDetails = {
+  "Alex Turner": {
+    nationality: "USA",
+    height: "5'11\"",
+    weight: "155 lbs",
+    handedness: "Right-handed",
+    playstyle: "Aggressive baseliner",
+    description: "A fast junior player with a powerful forehand.",
+    photo: "https://via.placeholder.com/150"
+  },
+  "Jordan Lee": {
+    nationality: "USA",
+    height: "5'9\"",
+    weight: "148 lbs",
+    handedness: "Left-handed",
+    playstyle: "Counterpuncher",
+    description: "Consistent and strategic, excels in long rallies.",
+    photo: "https://via.placeholder.com/150"
+  },
+  "Chris Patel": {
+    nationality: "USA",
+    height: "6'0\"",
+    weight: "165 lbs",
+    handedness: "Right-handed",
+    playstyle: "All-court player",
+    description: "Balanced player with strong serve and net play.",
+    photo: "https://via.placeholder.com/150"
+  },
+  "Mia Johnson": {
+    nationality: "USA",
+    height: "5'7\"",
+    weight: "130 lbs",
+    handedness: "Right-handed",
+    playstyle: "Aggressive baseliner",
+    description: "Explosive and quick, takes the ball early.",
+    photo: "https://via.placeholder.com/150"
+  },
+  "Ethan Brooks": {
+    nationality: "USA",
+    height: "5'10\"",
+    weight: "150 lbs",
+    handedness: "Right-handed",
+    playstyle: "Serve-and-volley",
+    description: "Attacks the net and finishes points quickly.",
+    photo: "https://via.placeholder.com/150"
+  },
+  "Sofia Ramirez": {
+    nationality: "USA",
+    height: "5'6\"",
+    weight: "128 lbs",
+    handedness: "Left-handed",
+    playstyle: "Defensive strategist",
+    description: "Great court coverage and consistency.",
+    photo: "https://via.placeholder.com/150"
+  }
+};
 
-        const dbResult = await pool.query(
-            'SELECT * FROM tournaments WHERE id = $1',
-            [id]
-        );
+app.get("/api/players/:id/details", async (req, res) => {
+  try {
+    const { id } = req.params;
 
-        if (dbResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Tournament not found' });
-        }
+    // 1. Get player from YOUR database
+    const result = await pool.query(
+      "SELECT * FROM players WHERE id = $1",
+      [id]
+    );
 
-        const tournament = dbResult.rows[0];
-
-        const searchName = encodeURIComponent(tournament.name);
-
-        const url = `https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${searchName}`;
-
-        const response = await fetch(url);
-
-        if (!response.ok) {
-            return res.status(500).json({ error: 'Public API request failed' });
-        }
-
-        const data = await response.json();
-
-        const teamInfo = data?.teams?.[0] || null;
-
-        res.status(200).json({
-            tournament,
-            enrichment: teamInfo
-                ? {
-                    teamName: teamInfo.strTeam,
-                    sport: teamInfo.strSport,
-                    league: teamInfo.strLeague,
-                    country: teamInfo.strCountry
-                }
-                : null
-        });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to fetch enriched tournament data' });
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Player not found" });
     }
+
+    const player = result.rows[0];
+
+    // 2. Call TheSportsDB
+    const url = `https://www.thesportsdb.com/api/v1/json/3/searchplayers.php?p=${encodeURIComponent(player.name)}`;
+
+    let apiPlayer = null;
+
+    try {
+      const response = await fetch(url);
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.player && data.player.length > 0) {
+          apiPlayer = data.player[0];
+        }
+      }
+    } catch (apiError) {
+      console.log("API failed, using fallback data");
+    }
+
+    // 3. Merge data (API → fallback → default)
+    const fallback = fallbackDetails[player.name] || {};
+
+    const details = {
+      id: player.id,
+      name: player.name,
+      age: player.age,
+      ranking: player.ranking,
+      seed: player.seed,
+
+      nationality: apiPlayer?.strNationality || fallback.nationality || "Unknown",
+      height: apiPlayer?.strHeight || fallback.height || "Unknown",
+      weight: apiPlayer?.strWeight || fallback.weight || "Unknown",
+      handedness: apiPlayer?.strSide || fallback.handedness || "Unknown",
+      playstyle: apiPlayer?.strPosition || fallback.playstyle || "Unknown",
+      description: apiPlayer?.strDescriptionEN || fallback.description || "No description available",
+      photo: apiPlayer?.strThumb || fallback.photo || "https://via.placeholder.com/150"
+    };
+
+    res.json(details);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch player details" });
+  }
 });
 
 app.listen(PORT, () => {
