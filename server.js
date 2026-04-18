@@ -673,7 +673,7 @@ app.post('/api/tournaments/:id/generate-matches', async (req, res) => {
             );
         }
 
-        return res.json({
+        return res.status(201).json({
             message: "Round 1 generated dynamically",
             matchesCreated: matchPairs.length
         });
@@ -723,7 +723,7 @@ app.post("/api/tournaments/:id/next-round", async (req, res) => {
         );
 
         if (!allCompleted) {
-            return res.json({message: "Round not complete"});
+            return res.status(400).json({message: "Round not complete"});
         }
 
         // 3. Collect winners
@@ -739,7 +739,7 @@ app.post("/api/tournaments/:id/next-round", async (req, res) => {
             );
             const winnerName = resultWinner.rows[0].name;
 
-            return res.json({
+            return res.status(200).json({
                 message: `Tournament winner: ${winnerName}`,
                 winnerName
             });
@@ -774,7 +774,7 @@ app.post("/api/tournaments/:id/next-round", async (req, res) => {
             );
         }
 
-        res.json({
+        res.status(201).json({
             message: `Round ${nextRoundNumber} generated`,
             matchesCreated: matchPairs.length
         });
